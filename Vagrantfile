@@ -9,6 +9,7 @@ config_file=File.expand_path(File.join(File.dirname(__FILE__), 'vagrant_variable
 settings=YAML.load_file(config_file)
 
 LABEL_PREFIX    = settings['label_prefix'] ? settings['label_prefix'] + "-" : ""
+NCBTS           = settings['cbt_vms']
 NMONS           = settings['mon_vms']
 NOSDS           = settings['osd_vms']
 NMDSS           = settings['mds_vms']
@@ -60,7 +61,8 @@ ansible_provision = proc do |ansible|
     'clients'          => (0..CLIENTS - 1).map { |j| "#{LABEL_PREFIX}client#{j}" },
     'iscsigws'         => (0..NISCSI_GWS - 1).map { |j| "#{LABEL_PREFIX}iscsi_gw#{j}" },
     'mgrs'             => (0..MGRS - 1).map { |j| "#{LABEL_PREFIX}mgr#{j}" },
-    'grafana-server'   => (0..GRAFANA - 1).map { |j| "#{LABEL_PREFIX}grafana#{j}" }
+    'grafana-server'   => (0..GRAFANA - 1).map { |j| "#{LABEL_PREFIX}grafana#{j}" },
+    'cbts'             => (0..NCBTS - 1).map { |j| "#{LABEL_PREFIX}cbt#{j}" },
   }
 
   ansible.extra_vars = {
@@ -573,5 +575,29 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       # Run the provisioner after the last machine comes up
       osd.vm.provision 'ansible', &ansible_provision if i == (NOSDS - 1)
     end
+  end
+
+  (0..NCBTS - 1).each do | i |
+     config.vm.define "#{LABEL_PREFIX}cbt#{i}" do | cbt |
+         cbt.vm.box = "centos/8"
+         cbt.vm.hostname = "#{LABEL_PREFIX}#{i}"
+         if ASSIGN_STATIC_IP
+           cbt.vm.network :private_network,
+              ip: "#{PUBLIC_SUBNET}.#{$last_ip_pub_digit+=1}"
+           cbt.vm.network :private_network,
+              ip: "#{CLUSTER_SUBNET}.#{$last_ip_cluster_digit+=1}"
+         end
+         # Libvirt
+         cbt.vm.provider :libvirt do |lv|
+            lv.memory = MEMORY
+            lv.random_hostname = true
+         end
+         # Run the shell provisioner immediately to prep it for the ansible provisioner
+         cbt.vm.provision 'shell', inline: <<-SHELL
+            dnf install -y "python3-devel"
+         SHELL
+         # Run the ansible provisioner after the last machine comes up
+         cbt.vm.provision 'ansible', &ansible_provision if i == (NCBTS - 1)
+     end
   end
 end
